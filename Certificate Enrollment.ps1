@@ -18,7 +18,6 @@ function Write-Log {
         [Parameter(position=3)][string]$LogFile = "$env:windir\temp\LPUlog.log",
         [switch]$break,
         [switch]$tee
-
     )
 
     if( !$Component ){ $Component = $PSCommandPath -replace '^.*\\|\.[^\.]*$' } # script name
@@ -119,18 +118,18 @@ else{
     }
 
     #We need to create a service record to tell the domain we're listening on https, let's do that below
-    $fqdn = [System.Net.Dns]::GetHostByName(($env:ComputerName)).HostName.ToLower()
-    $SPNoutput = Invoke-Expression "setspn -S HTTPS/$fqdn $($env:COMPUTERNAME)" -ErrorVariable spnerror
+    # $fqdn = [System.Net.Dns]::GetHostByName(($env:ComputerName)).HostName.ToLower()
+    # $SPNoutput = Invoke-Expression "setspn -S HTTPS/$fqdn $($env:COMPUTERNAME)" -ErrorVariable spnerror
 
-    #test for https record in output of prev cmd
-    if ($out = $SPNoutput | select-string HTTPS) {
-        Write-Log "success!  SPN seems to have been created, output [$($out.ToString().Trim())]" -tee
-        Write-Log "output from SPN command $SPNoutput"
-        exit 0
-    }else{
-        Write-Log "!error condition: failed to create SPN! output [$SPNoutput] error [$SPNerror]" -tee
-        Write-Log "!error condition: exiting with errorlevel 4" -tee
-        exit 4
-    }
+    # #test for https record in output of prev cmd
+    # if ($out = $SPNoutput | select-string HTTPS) {
+    #     Write-Log "success!  SPN seems to have been created, output [$($out.ToString().Trim())]" -tee
+    #     Write-Log "output from SPN command $SPNoutput"
+    #     exit 0
+    # }else{
+    #     Write-Log "!error condition: failed to create SPN! output [$SPNoutput] error [$SPNerror]" -tee
+    #     Write-Log "!error condition: exiting with errorlevel 4" -tee
+    #     exit 4
+    # }
 
 }
