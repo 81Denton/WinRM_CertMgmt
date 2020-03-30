@@ -16,7 +16,7 @@ So, if you're able to provision WinRM over HTTPs throughout your environment, yo
 
 This single script handles all of these problems. Here's how we handle each of these scenarios
 
-*Don't have HTTPs configured?*  We'll check for a cert and if we find one, we'll configure the listeners and throw an `exit code 0`.
+*Don't have HTTPS configured?*  We'll check for a cert and if we find one, we'll configure the listeners and throw an `exit code 0`.
 
 *Already have everything configured perfectly?* We throw an `exit code 0`.
 

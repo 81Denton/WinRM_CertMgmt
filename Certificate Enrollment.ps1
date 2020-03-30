@@ -1,18 +1,35 @@
-﻿#Requires -version 4
+﻿#Requires -Version 4
 
 <# error codes
-#  0 - success
-#  1 - invalid cert (expired / name mismatch)
-#  3 - no cert available to enable https
-#  4 - misc error
+0 - success
+1 - invalid cert (expired / name mismatch)
+3 - no cert available to enable https
+4 - misc error
+#>
 
-v 2.0 - add logic to renew a cert
- #>
+# Original author: Stephen Owen (https://github.com/1RedOne // https://github.com/1RedOne/WinRM_CertMgmt)
+
+# Prerequisites:
+# PowerShell Version 4
+# WinRM: Firewall exception (5986 TCP) and WinRM service set to auto start
+
+# Changelog
+# 2020-03-30 added exit code 0 and log message if listener gets updated to use a longer cert.
+#   if listener exists, it gets deleted and added instead of modified (prevents errors if existing listener contains a bad hostname).
+#   fixed new listener creation to create a new listener with the correct cert instead of using winrm quickconfig. misc grammar and formatting changes.
+
+# TODO
+# Test if 'setspn' is required
+# Add separate error code for expired cert
+# Write logs to windows event log instead of local file
+# Add error feedback for 'Requires -Version 4' that can be fed into another script that updates PS versions
+# Replace 'Invoke-Expression' with powershell equivalents
+
 
 #region setup logging
 function Write-Log {
     param(
-        [int]$ErrorLevel=1, # 1 - info, 2 - warning, 3 - error
+        [int]$ErrorLevel=1, # 1 - info, 2 - warning, 3 - error, 4 - misc
         [Parameter(position=1,ValueFromPipeline=$true)][string]$Msg,
         [Parameter(position=2)][string]$Component, # source of the entry
         [Parameter(position=3)][string]$LogFile = "$env:windir\temp\LPUlog.log",
@@ -36,52 +53,53 @@ function Write-Log {
 }
 #endregion
 
+#get fqdn
+$fqdn = [System.Net.Dns]::GetHostByName(($env:ComputerName)).HostName.ToLower()
 #check if listener already exists
 $listener = Get-ChildItem WSMan:\localhost\Listener | Where-Object Keys -like *https*
 
 if ($listener){
-    #Listener already exists, verify it's using the right cert, and the longest possible cert
+    #Listener already exists, verify it's using an appropriate certificate (matching subject, server EKU, not self signed), and the cert with the longest possible validity period
 
     #Resolve the HTTPs listener name
     $ListenerName = Get-ChildItem WSMan:\localhost\Listener | Where-Object Keys -like *https* | Select-Object -expand Name
 
     #Get the WINRM HTTPS listener certificate thumbprint
-    $CertThumbprt =  (Get-ChildItem "WSMan:\localhost\Listener\$ListenerName" | Where-Object Name -like "CertificateThumbprint" |Select-Object -ExpandProperty Value) -replace " ",""
+    $CertThumbprt =  (Get-ChildItem "WSMan:\localhost\Listener\$ListenerName" | Where-Object Name -like "CertificateThumbprint" | Select-Object -ExpandProperty Value) -replace " ",""
 
     #Compare that to our longest cert...
 
     #grabs the longest lasting cert availble for SSL
-    $longestCert = Get-ChildItem cert:\localmachine\My | Where-Object EnhancedKeyUsageList -like *Server*  | Where-Object Subject -like *$env:COMPUTERNAME* |
+    $LongestValidCertThmbprt = Get-ChildItem cert:\localmachine\My | Where-Object EnhancedKeyUsageList -like "*(1.3.6.1.5.5.7.3.1)*"  | Where-Object Subject -like *$env:COMPUTERNAME* |
         Where-Object Issuer -NotLike *$($ENV:COMPUTERNAME)* | Sort-Object NotAfter -Descending | Select-Object -ExpandProperty ThumbPrint | Select-Object -First 1
 
-    write-log "Is the current cert for SSL the longest one available ? $($longestCert -eq $CertThumbprt)" -tee
+    write-log "Found existing listener using a valid certificate. Checking if certificate store contains a cert with a longer validity period. Result: $($LongestValidCertThmbprt -eq $CertThumbprt)" -tee
 
     #Are we using the longest cert we could? If so, we've got nothing to do, time to quit
-    If ($longestCert -eq $CertThumbprt){
+    If ($LongestValidCertThmbprt -eq $CertThumbprt){
         #we're done
-        Write-log "This machine is using the longest possible cert for SSL. Exiting with errorlevel 0." -tee
+        Write-Log "This machine is using the longest possible cert for SSL. Exiting with errorlevel 0." -tee
         exit 0
     }
 
-    #Is $CertThumbPrt or $LongestCert actually nonexistant?
-    if (($null -eq $longestCert) ) {
+    #Is $CertThumbPrt or $LongestValidCertThmbprt actually nonexistant?
+    if (($LongestValidCertThmbprt -eq $null) ) {
         #! Error condition: listener is enabled, but not using a valid cert
-        Write-log "!error condtion: This machine doesn't have a valid cert anymore (maybe it changed names or domains?). Exiting with errorlevel 1." -tee
+        Write-Log "!error condition: This machine doesn't have a valid cert anymore (maybe it changed names or domains?). Exiting with errorlevel 1." -tee
         exit 1
 
-        #later : try to renew a cert
+        #later : try to renew a cert (Get-Certficate)
 
     }
 
-    #Do we have a longer cert available and we're not using it?  Lets fix that
-    If ($longestCert -ne $CertThumbprt){
+    #Do we have a longer cert available and we're not using it?  Let's fix that
+    If ($LongestValidCertThmbprt -ne $CertThumbprt){
 
-        #$certpath =  (get-childitem "WSMan:\localhost\Listener\$ListenerName" | Where-Object Name -like "CertificateThumbprint").pspath
-        Set-Item -Path "WSMan:\localhost\Listener\$ListenerName\CertificateThumbprint" -Value $longestCert -Force
-        #PowerShell gymnastics to use WinRM without errors
-        $cmd = "winrm set winrm/config/service '@{CertificateThumbprint=`"$longestCert`"}'"
-        Invoke-Expression $cmd
-
+        #remove current listener and create a new one using the longest valid cert
+        Remove-WSManInstance -ResourceURI winrm/config/listener -SelectorSet @{Address="*";Transport="HTTPS"}
+        New-WSManInstance -ResourceURI winrm/config/listener -SelectorSet @{Address="*";Transport="HTTPS"} -ValueSet @{Hostname=$fqdn;CertificateThumbprint=$LongestValidCertThmbprt}
+        Write-Log "WinRM HTTPS listener has been updated to use a certificate with a longer validity period. Exiting with errorlevel 0." -tee
+        exit 0
     }
 
 }
@@ -89,33 +107,42 @@ else{
     #if no listener...
 
     #attempts to find a certificate suitable for Client Authentication for this system, and picks the one with the longest date
-    $longestCert = Get-ChildItem cert:\localmachine\My | Where-Object EnhancedKeyUsageList -like *Server*  | Where-Object Subject -like *$env:COMPUTERNAME* | Sort-Object NotAfter -Descending
+    $LongestValidCert = Get-ChildItem cert:\localmachine\My | Where-Object EnhancedKeyUsageList -like "*(1.3.6.1.5.5.7.3.1)*" |
+        Where-Object Subject -like *$env:COMPUTERNAME* | Where-Object Issuer -NotLike *$($ENV:COMPUTERNAME)* | Sort-Object NotAfter -Descending |
+        Select-Object -First 1
 
     #region errorconditions
-        #if longestCert is empty, then we can't setup a listener, lets #exit
-        If ($null -eq $longestCert){
+        #if LongestValidCert is empty, then we can't setup a listener, lets #exit
+        If ($LongestValidCert -eq $null){
             Write-Log -Msg "!error condition: no valid cert to enable a listener (no cert or name mismatch). Exiting with errorlevel 3." -tee
             exit 3
         }
 
         #cert has expired
-        if ($longestcert.NotAfter -le (Get-Date)){
+        if ($LongestValidCert.NotAfter -le (Get-Date)){
             #! error condition: Certificate has expired
-            Write-Log -Msg "!error condition: The only cert available has expired. Exiting with errorlevel 1." -tee
+            Write-Log -Msg "!error condition: The only valid cert available has expired. Exiting with errorlevel 1." -tee
 
             #Renew cert steps go here
             exit 1
         }
     #endregion
 
-    #We have a valid cert, enabling winrm over https (tl: can't contain the output of this command below if it errors, sadly)
-    Invoke-Expression "winrm quickconfig -transport:https -force" -ErrorVariable winRMerror | Out-Null
+    #We have a valid cert, enabling WinRM over HTTPS
+    New-WSManInstance -ResourceURI winrm/config/listener -SelectorSet @{Address="*";Transport="HTTPS"} -ValueSet @{Hostname=$fqdn;CertificateThumbprint=$LongestValidCert.Thumbprint} -ErrorVariable winRMerror | Out-Null
     if ($WinrmError){
        #! error condition: winrm quickconfig failed for some reason
-       Write-Log "!error condition: winrm quickconfig failed for some reason. Exiting with errorlevel 4." -tee
+       Write-Log "!error condition: error occurred during WinRM HTTPS listener creation. Exiting with errorlevel 4." -tee
        Write-Log "!error text $WinrmError"
        exit 4
     }
+    # remove the following else block if you uncomment the setspn block
+    else {
+        Write-Log "WinRM HTTPS listener has been created successfully, using an existing certificate. Exiting with errorlevel 0." -tee
+        exit 0
+    }
+
+    # Code below is commented out since I couldn't find any reasons why creating an HTTPS SPN on top of the existing WSMAN SPN is neccessary
 
     #We need to create a service record to tell the domain we're listening on https, let's do that below
     # $fqdn = [System.Net.Dns]::GetHostByName(($env:ComputerName)).HostName.ToLower()
