@@ -8,33 +8,33 @@
         Prerequisites:
             PowerShell version 4 (WMF 4 is compatible with Windows Server 2008 R2 and above)
     .OUTPUTS
-        Logs are written to the Windows Application log with a custom soruce named 'WinRM-Setup-Script'.
+        Logs are written to the Windows Application log with a custom soruce named 'WinRM-HTTPS-Setup'.
     .NOTES
         Original script by: Stephen Owen (https://github.com/1RedOne // https://github.com/1RedOne/WinRM_CertMgmt)
         Modifications by: https://github.com/81Denton
-        TODO
-            Test if 'setspn' is required
-            Add separate error code for expired cert
-            Write logs to windows event log (ELK compatible) instead of local file
-            Add error feedback for 'Requires -Version 4' that can be fed into another script that updates PS versions
-            Replace 'Invoke-Expression' with powershell equivalents
-        Changelog
-        2020-03-30: added exit code 0 and log message if listener gets updated to use a longer cert.
+
+        Changelog:
+        v1.1        2020-03-30
+            added exit code 0 and log message if listener gets updated to use a longer cert.
             if listener exists, it gets deleted and added instead of modified (prevents errors if existing listener contains a bad hostname).
-            fixed new listener creation to create a new listener with the correct cert instead of using winrm quickconfig. misc grammar and formatting changes.
-        2020-03-31: made log time formatting less verbose. addded cert thumbprints to logs
-        2020-04-01: replaced Write-Log with New-EventLog to use win event logs for logging
+            fixed new listener creation to create a new listener with the correct cert instead of using winrm quickconfig.
+            misc grammar and formatting changes.
+        v1.2        2020-03-31
+            made log time formatting less verbose. addded cert thumbprints to logs
+            added #Requires -RunAsAdministrator
+        v1.3        2020-04-01
+            replaced Write-Log with New-EventLog to use win event logs for logging
 #>
 
 #Requires -Version 4
 #Requires -RunAsAdministrator
 
 #global defines
-$CustomSourceName = "WinRM-Setup-Script"
+$CustomSourceName = "WinRM-HTTPS-Setup"
 $EventID = 31337
 $fqdn = [System.Net.Dns]::GetHostByName(($env:ComputerName)).HostName.ToLower()
 
-#Register new event log source 'WinRM-Setup-Script' to the Windows System log
+#Register new event log source 'WinRM-HTTPS-Setup' to the Windows Application log
 try{
     if(([System.Diagnostics.EventLog]::SourceExists($CustomSourceName))){
         Write-Verbose "Event log source '$CustomSourceName' already exists."
@@ -46,8 +46,6 @@ try{
 }catch{
     Write-Error "FATAL ERROR: Could not create or check for the log source '$CustomSourceName'. Ending script execution" -ErrorAction Stop
 }
-
-#Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "Message. Context: '$ENV:USERNAME'."
 
 #Check if WinRM HTTPS listener already exists
 $listener = Get-ChildItem WSMan:\localhost\Listener | Where-Object Keys -like *https*
