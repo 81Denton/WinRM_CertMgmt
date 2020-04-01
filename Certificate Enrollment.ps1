@@ -1,6 +1,6 @@
 ﻿<#
     .SYNOPSIS
-        Is used to install or refresh an HTTPS WSMan Listener on a computer with a valid certificate.
+        Is used to install or refresh an HTTPS WinRM Listener on a computer with a valid certificate.
     .DESCRIPTION
         This script is designed to be called from a Startup/Logon PowerShell GPO.
         If multiple valid certificates are present in the local cert store, it will pick the one with the longest validity period.
