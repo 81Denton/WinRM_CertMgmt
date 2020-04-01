@@ -6,9 +6,9 @@
         If multiple valid certificates are present in the local cert store, it will pick the one with the longest validity period.
         This script does not handle basic WinRM setup such as adding a firewall exception (5986 TCP) or setting the WinRM service to auto start.
         Prerequisites:
-            PowerShell version 4 (WMF4 is compatible with Windows Server 2008 R2 and above)
+            PowerShell version 4 (WMF 4 is compatible with Windows Server 2008 R2 and above)
     .OUTPUTS
-        Log file stored in '$env:windir\temp\LPUlog.log'.
+        Logs are written to the Windows Application log with a custom soruce named 'WinRM-Setup-Script'.
     .NOTES
         Original script by: Stephen Owen (https://github.com/1RedOne // https://github.com/1RedOne/WinRM_CertMgmt)
         Modifications by: https://github.com/81Denton
@@ -30,25 +30,24 @@
 #Requires -RunAsAdministrator
 
 #global defines
-$CustomSourceName = "WinRM HTTPS Listener Setup"
-$WinLog = "System"
+$CustomSourceName = "WinRM-Setup-Script"
 $EventID = 31337
 $fqdn = [System.Net.Dns]::GetHostByName(($env:ComputerName)).HostName.ToLower()
 
-#Register new event log source 'WinRM HTTPS Listener Setup' to the Windows System log
+#Register new event log source 'WinRM-Setup-Script' to the Windows System log
 try{
     if(([System.Diagnostics.EventLog]::SourceExists($CustomSourceName))){
         Write-Verbose "Event log source '$CustomSourceName' already exists."
     }else{
-        New-EventLog –LogName $WinLog –Source $CustomSourceName
-        #[System.Diagnostics.EventLog]::CreateEventSource($CustomSourceName, $WinLog)
-        Write-Verbose "Created log source '$CustomSourceName' in the '$WinLog' log."
+        #New-EventLog –LogName Application –Source "$CustomSourceName"
+        [System.Diagnostics.EventLog]::CreateEventSource($CustomSourceName, 'Application')
+        Write-Verbose "Created log source '$CustomSourceName' in the 'Application' log."
     }
 }catch{
     Write-Error "FATAL ERROR: Could not create or check for the log source '$CustomSourceName'. Ending script execution" -ErrorAction Stop
 }
 
-#Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "Message. Context:'$ENV:USERNAME'"
+#Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "Message. Context: '$ENV:USERNAME'."
 
 #Check if WinRM HTTPS listener already exists
 $listener = Get-ChildItem WSMan:\localhost\Listener | Where-Object Keys -like *https*
@@ -67,11 +66,11 @@ if ($listener){
     $LongestValidCertThmbprt = Get-ChildItem cert:\localmachine\My | Where-Object EnhancedKeyUsageList -like "*(1.3.6.1.5.5.7.3.1)*"  | Where-Object Subject -like *$env:COMPUTERNAME* |
         Where-Object Issuer -NotLike *$($ENV:COMPUTERNAME)* | Sort-Object NotAfter -Descending | Select-Object -ExpandProperty ThumbPrint | Select-Object -First 1
 
-    Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "Found existing listener using a valid certificate '$CertThumbprt'. Checking if certificate store contains a cert with a longer validity period. Result: $($LongestValidCertThmbprt -eq $CertThumbprt). Context:'$ENV:USERNAME'"
+    Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "Found existing listener using a valid certificate '$CertThumbprt'. Checking if certificate store contains a cert with a longer validity period. Result: $($LongestValidCertThmbprt -eq $CertThumbprt). Context: '$ENV:USERNAME'."
 
     #Are we using the longest cert we could? If so, we've got nothing to do, time to quit
     If ($LongestValidCertThmbprt -eq $CertThumbprt){
-        Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "This machine is already using the certificate with the longest validity period. Finishing script execution. Context:'$ENV:USERNAME'"
+        Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "This machine is already using the certificate with the longest validity period. Finishing script execution. Context: '$ENV:USERNAME'."
         exit 0
     }
 
@@ -81,7 +80,7 @@ if ($listener){
     #2) listener is using an invalid cert (expired, name mismatch, self signed)
     #3) there is no valid cert available in cert store
     if (($LongestValidCertThmbprt -eq $null) ) {
-        Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "This machine's WinRM HTTPS listener is configured with an invalid certificate (expiration, name mismatch etc.); no other valid certificates are available. Aborting script execution. Context:'$ENV:USERNAME'"
+        Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "This machine's WinRM HTTPS listener is configured with an invalid certificate (expiration, name mismatch etc.); no other valid certificates are available. Aborting script execution. Context: '$ENV:USERNAME'."
         exit 1
     }
 
@@ -90,7 +89,7 @@ if ($listener){
         #Remove current listener and create a new one using the longest valid cert
         Remove-WSManInstance -ResourceURI winrm/config/listener -SelectorSet @{Address="*";Transport="HTTPS"}
         New-WSManInstance -ResourceURI winrm/config/listener -SelectorSet @{Address="*";Transport="HTTPS"} -ValueSet @{Hostname=$fqdn;CertificateThumbprint=$LongestValidCertThmbprt}
-        Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "WinRM HTTPS listener has been updated to use a certificate with a longer validity period. Old: '$CertThumbprt' New: '$LongestValidCertThmbprt'. Finishing script execution. Context:'$ENV:USERNAME'"
+        Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "WinRM HTTPS listener has been updated to use a certificate with a longer validity period. Old: '$CertThumbprt' New: '$LongestValidCertThmbprt'. Finishing script execution. Context: '$ENV:USERNAME'."
         exit 0
     }
 
@@ -107,13 +106,13 @@ else{
 
         #If LongestValidCert is empty, then we can't set up a listener, let's exit
         If ($LongestValidCert -eq $null){
-            Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "No valid certificate available to enable a listener. Aborting script execution. Context:'$ENV:USERNAME'"
+            Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "No valid certificate available to enable a listener. Aborting script execution. Context: '$ENV:USERNAME'."
             exit 1
         }
 
         #Cert has expired
         if ($LongestValidCert.NotAfter -le (Get-Date)){
-            Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "!error condition: The only valid certificate available has expired. Aborting script execution. Context:'$ENV:USERNAME'"
+            Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "!error condition: The only valid certificate available has expired. Aborting script execution. Context: '$ENV:USERNAME'."
             exit 1
         }
 
@@ -121,14 +120,14 @@ else{
     New-WSManInstance -ResourceURI winrm/config/listener -SelectorSet @{Address="*";Transport="HTTPS"} -ValueSet @{Hostname=$fqdn;CertificateThumbprint=$LongestValidCert.Thumbprint} -ErrorVariable winRMerror | Out-Null
     if ($WinrmError){
        #! error condition: WinRM HTTPS listener creation failed
-       Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "!error condition: Error occurred during listener creation. Aborting script execution. Context:'$ENV:USERNAME'"
+       Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "!error condition: Error occurred during listener creation. Aborting script execution. Context: '$ENV:USERNAME'."
        Write-Log "!error text: $WinrmError"
        exit 1
     }
     #Remove the following else{} block if you uncomment the setspn block
     else {
         $LongestValidCertThmbprt = $LongestValidCert.Thumbprint
-        Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "WinRM HTTPS listener has been created successfully, using an existing certificate with thumbprint '$LongestValidCertThmbprt'. Context:'$ENV:USERNAME'"
+        Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "WinRM HTTPS listener has been created successfully, using an existing certificate with thumbprint '$LongestValidCertThmbprt'. Context: '$ENV:USERNAME'."
         exit 0
     }
 
@@ -140,11 +139,11 @@ else{
 
     # #test for https record in output of prev cmd
     # if ($out = $SPNoutput | select-string HTTPS) {
-    #     Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "success!  SPN seems to have been created, output [$($out.ToString().Trim())]"
-    #     Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "output from SPN command $SPNoutput"
+    #     Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "success!  SPN seems to have been created, output [$($out.ToString().Trim())]"
+    #     Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Information -EventId $EventID -Message "output from SPN command $SPNoutput"
     #     exit 0
     # }else{
-    #     Write-EventLog -LogName $WinLog -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "!error condition: failed to create SPN! output [$SPNoutput] error [$SPNerror]"
+    #     Write-EventLog -LogName Application -Source $CustomSourceName -EntryType Error -EventId $EventID -Message "!error condition: failed to create SPN! output [$SPNoutput] error [$SPNerror]"
     #     exit 1
     # }
 
