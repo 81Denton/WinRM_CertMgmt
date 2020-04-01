@@ -38,16 +38,16 @@ function Write-Log {
 #>
 
     param(
-        [int]$ErrorLevel=1, # 1 - info, 2 - warning, 3 - error, 4 - misc
+        [int]$ErrorLevel=1, #1 - info, 2 - warning, 3 - error, 4 - misc
         [Parameter(position=1,ValueFromPipeline=$true)][string]$Msg,
-        [Parameter(position=2)][string]$Component, # source of the entry
+        [Parameter(position=2)][string]$Component, #source of the entry
         [Parameter(position=3)][string]$LogFile = "$env:windir\temp\LPUlog.log",
         [switch]$break,
         [switch]$tee
     )
 
-    if( !$Component ){ $Component = $PSCommandPath -replace '^.*\\|\.[^\.]*$' } # script name
-    if( !$LogFile ){ $LogFile = $PSCommandPath -replace '\.ps1$','.log' } # <ScriptRoot>\<ScriptName>.log
+    if(!$Component){$Component = $PSCommandPath -replace '^.*\\|\.[^\.]*$'} #script name
+    if(!$LogFile){$LogFile = $PSCommandPath -replace '\.ps1$','.log'} #<ScriptRoot>\<ScriptName>.log
     if($break){$Msg='#############################################################'}
     if($tee){Write-Output $msg}
     $Time = Get-Date -Format 'HH:mm:ss.ff'
@@ -66,7 +66,7 @@ $listener = Get-ChildItem WSMan:\localhost\Listener | Where-Object Keys -like *h
 
 if ($listener){
     #Listener already exists, verify that it's using:
-    #1) an appropriate certificate: matching subject, server authetication EKU, not self signed
+    #1) a valid certificate: matching subject, server authetication EKU, not self signed, not expired
     #2) the cert with the longest possible validity period
 
     #Resolve the HTTPS listener name
@@ -119,13 +119,13 @@ else{
 
         #If LongestValidCert is empty, then we can't set up a listener, let's exit
         If ($LongestValidCert -eq $null){
-            Write-Log -Msg "!error condition: no valid cert to enable a listener (no cert or name mismatch). Exiting with errorlevel 3." -tee
+            Write-Log -Msg "!error condition: No valid certificate available to enable a listener. Exiting with errorlevel 3." -tee
             exit 3
         }
 
         #Cert has expired
         if ($LongestValidCert.NotAfter -le (Get-Date)){
-            Write-Log -Msg "!error condition: The only valid cert available has expired. Exiting with errorlevel 1." -tee
+            Write-Log -Msg "!error condition: The only valid certificate available has expired. Exiting with errorlevel 1." -tee
             exit 1
         }
 
@@ -133,8 +133,8 @@ else{
     New-WSManInstance -ResourceURI winrm/config/listener -SelectorSet @{Address="*";Transport="HTTPS"} -ValueSet @{Hostname=$fqdn;CertificateThumbprint=$LongestValidCert.Thumbprint} -ErrorVariable winRMerror | Out-Null
     if ($WinrmError){
        #! error condition: WinRM HTTPS listener creation failed
-       Write-Log "!error condition: error occurred during WinRM HTTPS listener creation. Exiting with errorlevel 4." -tee
-       Write-Log "!error text $WinrmError"
+       Write-Log "!error condition: Error occurred during listener creation. Exiting with errorlevel 4." -tee
+       Write-Log "!error text: $WinrmError"
        exit 4
     }
     #Remove the following else{} block if you uncomment the setspn block
